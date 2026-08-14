@@ -30,8 +30,8 @@ below calibrated against reality:
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
-from app.deeplinks import ola_link, rapido_link, uber_link
-from app.models import PlatformRides, RideOption, UserProfile
+from .deeplinks import ola_link, rapido_link, uber_link
+from .models import PlatformRides, RideOption, UserProfile
 
 VEHICLE_TYPES = ("Bike", "Auto", "Cab")
 PROVIDERS = ("Uber", "Ola", "Rapido")

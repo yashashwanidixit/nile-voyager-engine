@@ -1,5 +1,5 @@
 from typing import List, Dict
-from app.models import Hotel, UserProfile
+from .models import Hotel, UserProfile
 
 
 def _reason_for(hotel: Hotel, profile: UserProfile) -> str:

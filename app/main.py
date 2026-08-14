@@ -1,41 +1,39 @@
-import asyncio
-import sys
+import asyncio, sys
 
-# CRITICAL FIX FOR WINDOWS PLAYWRIGHT CRASH
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
+    asyncio.set_event_loop(asyncio.ProactorEventLoop())
 from dataclasses import asdict
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app.profiles import get_profile
-from app.scrapers import makemytrip, agoda, booking
-from app.ranking import select_top_hotels
-from app.geocoding import geocode
-from app.routing import get_route
-from app.rides import estimate_all_platforms
+from .profiles import get_profile
+from .scrapers import makemytrip, agoda, booking
+from .ranking import select_top_hotels
+from .geocoding import geocode
+from .routing import get_route
+from .rides import estimate_all_platforms
 
 app = FastAPI(title="Bangalore Travel Engine - Stage 1")
 
 
 class HotelSearchRequest(BaseModel):
-    profile_id: str
-    destination: str
-    checkin: str
+    profile_id: str          # "user_5star" | "user_4star"
+    destination: str         # e.g. "Whitefield, Bangalore"
+    checkin: str              # "DD/MM/YYYY" for MMT; scrapers each normalize internally
     checkout: str
-    # --- NEW FIELDS ADDED HERE ---
-    adults: int = 2
-    children: int = 0
-    rooms: int = 1
 
 
 class RideRequest(BaseModel):
+    """
+    Matches the new pipeline: user types source/destination text (image 1,
+    "User input" box), we geocode both via Nominatim, route via GraphHopper,
+    then estimate fares - no more raw lat/lon required from the caller.
+    """
     profile_id: str
-    pickup_text: str
-    drop_text: str
+    pickup_text: str          # free-text place, e.g. "Kempegowda Airport, Bangalore"
+    drop_text: str            # free-text place, e.g. the hotel address/name
     surge_multiplier: Optional[float] = 1.0
 
 
@@ -46,11 +44,11 @@ async def get_hotels(req: HotelSearchRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Pass the new adult/child/room parameters to all scrapers
+    # Run all three site scrapers concurrently.
     results = await asyncio.gather(
-        makemytrip.scrape(req.destination, req.checkin, req.checkout, adults=req.adults, children=req.children, rooms=req.rooms, limit=5),
-        agoda.scrape(req.destination, req.checkin, req.checkout, adults=req.adults, children=req.children, rooms=req.rooms, limit=5),
-        booking.scrape(req.destination, req.checkin, req.checkout, adults=req.adults, children=req.children, rooms=req.rooms, limit=5),
+        makemytrip.scrape(req.destination, req.checkin, req.checkout, limit=5),
+        agoda.scrape(req.destination, req.checkin, req.checkout, limit=5),
+        booking.scrape(req.destination, req.checkin, req.checkout, limit=5),
         return_exceptions=True,
     )
 
@@ -74,17 +72,20 @@ async def get_rides(req: RideRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Step 1: geocode both ends (Nominatim / OSM).
     try:
         pickup = await geocode(req.pickup_text)
         drop = await geocode(req.drop_text)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Step 2: road distance + duration (GraphHopper), not straight-line.
     try:
         distance_km, duration_min = await get_route(pickup, drop)
     except (RuntimeError, ValueError) as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    # Step 3 + 4: fare estimator, grouped per platform (comparison screen).
     platforms = estimate_all_platforms(
         profile=profile,
         pickup=pickup,
@@ -105,7 +106,9 @@ async def get_rides(req: RideRequest):
         "platforms": [
             {
                 "provider": p.provider,
-                "options": [{**vars(o)} for o in p.options],
+                "options": [
+                    {**vars(o)} for o in p.options
+                ],
             }
             for p in platforms
         ],

@@ -1,4 +1,4 @@
-from app.models import UserProfile
+from .models import UserProfile
 
 PROFILES = {
     "user_5star": UserProfile(
