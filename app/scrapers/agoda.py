@@ -279,50 +279,123 @@ class AgodaSession(HotelSession):
         except Exception:
             print("⚠️ Timeout waiting for hotel cards; proceeding with current DOM.")
 
-        # 8. Scrape hotel cards
-        cards = self.page.locator("div[data-selenium='hotel-item'], div[data-testid='property-card']")
-        count = min(await cards.count(), limit * 3)
+        # 8. Scrape hotel cards using content-based extraction (Zepto-style)
+        await self.page.wait_for_load_state("networkidle", timeout=15000)
+        
+        # Take a screenshot for debugging
+        await self.page.screenshot(path="agoda_search_results.png", full_page=True)
+        print("📸 Screenshot saved as agoda_search_results.png")
+        
+        print("🔍 Scraping hotel cards...")
+
+        # Locator for card containers (stable selectors)
+        card_selector = 'div[data-selenium="hotel-item"], div[data-testid="property-card"], li[data-selenium="hotel-item"]'
+        cards = self.page.locator(card_selector)
+        card_count = await cards.count()
+
+        # Fallback: if no cards with standard selector, find by URL pattern
+        if card_count == 0:
+            print("⚠️ No cards with standard selector; falling back to URL pattern.")
+            links = self.page.locator('a[href*="/hotel/"], a[href*="/en-in/hotel/"]')
+            link_count = await links.count()
+            if link_count == 0:
+                await self.page.screenshot(path="agoda_no_cards.png")
+                print("📸 No card links found. Saved agoda_no_cards.png")
+                return []
+            # Use the parent containers of the links
+            cards = links.locator('xpath=ancestor::div[1]')
+            card_count = await cards.count()
+            print(f"🔍 Found {card_count} cards via URL pattern.")
+        else:
+            print(f"🔍 Found {card_count} card elements.")
+
         hotels = []
-        for i in range(count):
+        for i in range(min(card_count, limit * 3)):
             if len(hotels) >= limit:
                 break
             card = cards.nth(i)
-            name = await self._safe_text(card.locator("[data-selenium='hotel-name'], [data-testid='title']"))
-            rating_raw = await self._safe_text(card.locator("[data-selenium='rating'], [data-testid='review-score']"))
-            price_raw = await self._safe_text(card.locator("[data-selenium='price'], [data-testid='price']"))
+
+            # 1. Get all visible text lines
+            full_text = await card.inner_text()
+            lines = [line.strip() for line in full_text.splitlines() if line.strip()]
+
+            # Helper: find a line matching a pattern
+            def find_line(patterns):
+                for line in lines:
+                    for pat in patterns:
+                        if pat.search(line):
+                            return line
+                return None
+
+            # 2. Extract Name: first line that is not a rating/price and length > 3
+            name = None
+            for line in lines:
+                if (not line.startswith(('₹', 'Rs.')) and
+                    not re.search(r'^\d+\.?\d*\s*(Excellent|Very Good|Good|Okay|Poor)', line) and
+                    not re.search(r'^\d+\.?\d*\s*/\s*\d+', line) and
+                    len(line) > 3):
+                    name = line
+                    break
             if not name:
+                # Fallback: first line
+                name = lines[0] if lines else None
+            if not name or len(name) < 3:
                 continue
 
-            # Extract detail URL
-            link = await card.locator("a").first.get_attribute("href")
-            detail_url = None
-            if link:
-                if not link.startswith("http"):
-                    detail_url = "https://www.agoda.com" + link
-                else:
-                    detail_url = link
+            # 3. Extract Price: line containing ₹ or Rs.
+            price_line = find_line([re.compile(r'₹\s*[\d,]+(\.\d+)?'), re.compile(r'Rs\.\s*[\d,]+(\.\d+)?')])
+            price = None
+            if price_line:
+                # Extract digits and dot
+                digits = ''.join(ch for ch in price_line if ch.isdigit() or ch == '.')
+                price = float(digits) if digits else None
 
-            hotel_id = detail_url.split('/')[-2] if detail_url else f"agoda-{i}"
+            # 4. Extract Rating: line with number and "Excellent", "Very Good", or "X/10"
+            rating_line = find_line([re.compile(r'\d+\.?\d*\s*(Excellent|Very Good|Good|Okay|Poor)'),
+                                    re.compile(r'\d+\.?\d*\s*/\s*\d+')])
+            rating = None
+            if rating_line:
+                match = re.search(r'(\d+\.?\d*)', rating_line)
+                if match:
+                    rating = float(match.group(1))
+
+            # 5. Extract Address (optional): look for a line containing a city name or "km"
+            # We'll skip this for now; we can use destination as fallback.
+
+            # 6. Detail URL
+            link_el = card.locator('a').first
+            detail_url = await link_el.get_attribute('href') if await link_el.count() > 0 else None
+            if detail_url and not detail_url.startswith('http'):
+                detail_url = 'https://www.agoda.com' + detail_url
+
+            hotel_id = detail_url.split('/')[-2] if detail_url else f'agoda-{i}'
 
             hotels.append(
                 Hotel(
                     id=hotel_id,
                     name=name,
                     source="Agoda",
-                    rating=parse_rating(rating_raw),
-                    price_per_night=parse_price(price_raw),
-                    address=destination,
-                    detail_url=detail_url,
+                    rating=rating,
+                    price_per_night=price,
+                    address=destination,  # we can use destination as address
+                    detail_url=detail_url
                 )
             )
-        return hotels
+            print(f"🏨 Found: {name} — ₹{price} — rating {rating}")
 
+        print(f"🏨 Scraped {len(hotels)} hotels from Agoda.")
+        return hotels
+    
+    # ------------------- Helper methods -------------------
     async def _select_date_agoda(self, date_obj: datetime):
         day = date_obj.day
         date_str = date_obj.strftime("%Y-%m-%d")
 
         try:
-            await self.page.wait_for_selector('.DayPicker, .calendar, [role="grid"], div[data-selenium="calendar-wrapper"]', timeout=5000)
+            await self.page.wait_for_selector(
+                '.DayPicker, .calendar, [role="grid"], div[data-selenium="calendar-wrapper"]',
+                timeout=5000
+            )
         except Exception:
             raise Exception("Date picker did not appear on the page.")
 
@@ -332,7 +405,6 @@ class AgodaSession(HotelSession):
                 const dateStr = args.dateStr;
                 const day = args.day;
 
-                // 1. Try data-selenium or data-date
                 const byData = document.querySelector(
                     `td[data-selenium="date-${dateStr}"] button, div[data-date="${dateStr}"], span[data-date="${dateStr}"]`
                 );
@@ -341,14 +413,12 @@ class AgodaSession(HotelSession):
                     return "data";
                 }
 
-                // 2. Try aria-label
                 const byAria = document.querySelector(`[aria-label*="${dateStr}"]`);
                 if (byAria) {
                     byAria.click();
                     return "aria";
                 }
 
-                // 3. Fallback: find visible enabled day number
                 const elements = document.querySelectorAll('button, td[role="gridcell"], div[role="gridcell"]');
                 for (const el of elements) {
                     if (el.textContent.trim() === String(day) && 
@@ -368,7 +438,7 @@ class AgodaSession(HotelSession):
             raise Exception(f"Could not select date {date_str} on Agoda.")
         await self.page.wait_for_timeout(400)
 
-    async def _kill_popups(self):
+    async def _kill_popups(self, selectors: Optional[list] = None):
         """Close overlays, cookie banners, and discount popups."""
         popup_selectors = [
             "button[aria-label='Close']",
