@@ -61,7 +61,7 @@ async def main():
     # 3. Scrape concurrently
     tasks = [
         
-        scrape_platform(AgodaSession, "Agoda", destination, checkin, checkout,
+        scrape_platform(MakeMyTripSession, "MakeMyTrip", destination, checkin, checkout,
                         adults, children, rooms, limit=5),
        
     ]

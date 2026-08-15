@@ -10,16 +10,20 @@ PLATFORMS = {
 }
 
 async def capture_platform(platform: str, url: str):
-    """Capture session for a single platform."""
-    state_file = f"{platform}_auth_state.json"
-    print(f"\n=== Capturing session for {platform.upper()} ===")
-    
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(
+            headless=False,
+            channel="chrome",
+            args=["--disable-http2", "--disable-blink-features=AutomationControlled"]
+        )
         context = await browser.new_context()
         page = await context.new_page()
 
-        await page.goto(url)
+        # Block resource types that aren't critical for login
+        await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"] else route.continue_())
+
+        await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Now you can log in manually – the page should be usable
 
         print("\n" + "=" * 60)
         print(f"Browser opened for {platform.upper()}.")
