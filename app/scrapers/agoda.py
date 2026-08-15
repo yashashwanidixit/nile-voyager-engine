@@ -19,6 +19,7 @@ class AgodaSession(HotelSession):
         # 1. Go to MMT homepage
         await self.page.goto("https://www.agoda.com/", wait_until="domcontentloaded")
         await self._kill_popups()  # close any modal
+        await self._ensure_logged_in()
 
         # 2. Switch to Hotels tab (if not already selected)
         hotels_tab = self.page.locator("li[data-cy='hotels'] a, span:has-text('Hotels')")
