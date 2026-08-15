@@ -1,4 +1,4 @@
-# Bangalore Travel Engine — Stage 1
+# Nile voyager engine— Stage 1
 
 Recommends 15 hotels (top 5 each from MakeMyTrip, Agoda, Booking.com) filtered
 by a hardcoded user rating-preference profile, with a reason per hotel. Once a
