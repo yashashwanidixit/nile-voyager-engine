@@ -18,7 +18,39 @@ class AgodaSession(HotelSession):
         # 1. Go to Agoda homepage (use self.page from base class)
         await self.page.goto("https://www.agoda.com/", wait_until="domcontentloaded")
         await self._kill_popups() # custom popup selectors
-         # check if we are logged in
+        # Use Playwright to find and click the Hotels tab
+       # 1.5 Ensure we are on the Hotels tab
+        # 1.5 Ensure we are on the Hotels tab
+        # 1.5 Ensure we are on the Hotels tab (click it anyway)
+        # 1.5 Ensure we are on the Hotels tab (click it anyway)
+        print("🔍 Clicking Hotels tab...")
+
+        try:
+            # Use a CSS selector that matches the tab button with role="tab" and text "Hotels"
+            tab_selector = 'button[role="tab"]:has-text("Hotels")'
+            await self.page.wait_for_selector(tab_selector, state="visible", timeout=10000)
+            hotels_tab = self.page.locator(tab_selector).first
+            await hotels_tab.click()
+            print("  ✅ Clicked Hotels tab using CSS selector.")
+        except Exception as e:
+            print(f"  ⚠️ CSS selector failed: {e}. Trying fallback...")
+            try:
+                # Fallback: use Playwright's role-based locator
+                hotels_tab = self.page.get_by_role("tab", name="Hotels")
+                await hotels_tab.first.wait_for(state="visible", timeout=5000)
+                await hotels_tab.first.click()
+                print("  ✅ Clicked Hotels tab using role fallback.")
+            except Exception as e2:
+                print(f"  ❌ Fallback also failed: {e2}")
+                # Debug: save screenshot and HTML
+                await self.page.screenshot(path="agoda_no_hotels_tab.png")
+                html = await self.page.content()
+                with open("agoda_page.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+                raise Exception("Could not click Hotels tab. Check saved debug files.")
+
+        await self.page.wait_for_timeout(1000)  # wait for the tab switch to take effectt
+                
 
         # 2. Fill destination (Agoda's search input)
         dest_input = self.page.locator(
