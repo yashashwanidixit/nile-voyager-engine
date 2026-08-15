@@ -10,92 +10,67 @@ from app.scrapers.base import parse_price, parse_rating
 
 class AgodaSession(HotelSession):
     def __init__(self):
-        super().__init__("agoda")  # IMPORTANT: use "agoda", not "mmt"
+        super().__init__("agoda")
 
     async def search_hotels(self, destination: str, checkin: str, checkout: str,
                             adults: int = 2, children: int = 0, rooms: int = 1,
                             limit: int = 5) -> List[Hotel]:
-        # 1. Go to Agoda homepage (use self.page from base class)
+        # 1. Go to Agoda homepage
         await self.page.goto("https://www.agoda.com/", wait_until="domcontentloaded")
-        await self._kill_popups() # custom popup selectors
-        # Use Playwright to find and click the Hotels tab
-       # 1.5 Ensure we are on the Hotels tab
-        # 1.5 Ensure we are on the Hotels tab
-        # 1.5 Ensure we are on the Hotels tab (click it anyway)
-        # 1.5 Ensure we are on the Hotels tab (click it anyway)
-        print("🔍 Clicking Hotels tab...")
+        await self._kill_popups()
 
-        try:
-            # Use a CSS selector that matches the tab button with role="tab" and text "Hotels"
-            tab_selector = 'button[role="tab"]:has-text("Hotels")'
-            await self.page.wait_for_selector(tab_selector, state="visible", timeout=10000)
-            hotels_tab = self.page.locator(tab_selector).first
-            await hotels_tab.click()
-            print("  ✅ Clicked Hotels tab using CSS selector.")
-        except Exception as e:
-            print(f"  ⚠️ CSS selector failed: {e}. Trying fallback...")
-            try:
-                # Fallback: use Playwright's role-based locator
-                hotels_tab = self.page.get_by_role("tab", name="Hotels")
-                await hotels_tab.first.wait_for(state="visible", timeout=5000)
-                await hotels_tab.first.click()
-                print("  ✅ Clicked Hotels tab using role fallback.")
-            except Exception as e2:
-                print(f"  ❌ Fallback also failed: {e2}")
-                # Debug: save screenshot and HTML
-                await self.page.screenshot(path="agoda_no_hotels_tab.png")
-                html = await self.page.content()
-                with open("agoda_page.html", "w", encoding="utf-8") as f:
-                    f.write(html)
-                raise Exception("Could not click Hotels tab. Check saved debug files.")
+        # Ensure we are strictly on the "Hotels" tab (and not Flight + Hotel)
+        await self.page.evaluate("""
+            () => {
+                const hotelTab = document.querySelector(
+                    'button[data-selenium="hotel-tab"], ' +
+                    'button[data-element-name="hotel-tab"], ' +
+                    '[data-element-name="tab-hotels"]'
+                );
+                if (hotelTab && hotelTab.getAttribute('aria-selected') !== 'true') {
+                    hotelTab.click();
+                }
+            }
+        """)
+        await self.page.wait_for_timeout(300)
 
-        await self.page.wait_for_timeout(1000)  # wait for the tab switch to take effectt
-                
-
-        # 2. Fill destination (Agoda's search input)
+        # 2. Fill destination
         dest_input = self.page.locator(
             "input[placeholder*='Enter a destination'], "
             "input[data-cy='hotelCitySearch'], "
-            "input[aria-label='Search']"
-        )
-        dest_input = self.page.locator(
-                "input[placeholder*='Enter a destination'], "
-                "input[data-cy='hotelCitySearch'], "
-                "input[aria-label='Search']"
-)
+            "input[aria-label='Search'], "
+            "input[data-selenium='textInput']"
+        ).first
         await dest_input.fill(destination)
-        await self.page.wait_for_timeout(800)  # wait for the list to appear
+        await self.page.wait_for_timeout(800)  # wait for autocomplete dropdown
 
-        # Use JavaScript to find and click the first suggestion
+        # Select first autocomplete suggestion
         clicked = await self.page.evaluate("""
-    (destination) => {
-        const selectors = [
-            'ul[data-selenium="autocomplete-result"] li',
-            'div[role="listbox"] > div, div[role="listbox"] > li',
-            'li[role="option"], div[role="option"]',
-            'ul[class*="autocomplete"] li, div[class*="autocomplete"] li',
-            'div[data-testid*="autocomplete"] li, div[data-automation*="autocomplete"] li'
-        ];
-        for (const sel of selectors) {
-            const elements = document.querySelectorAll(sel);
-            for (const el of elements) {
-                if (el.textContent.trim().toLowerCase().includes(destination.toLowerCase())) {
-                    el.click();
+            (destination) => {
+                const selectors = [
+                    'ul[data-selenium="autocomplete-result"] li',
+                    'li[data-selenium="autosuggest-item"]',
+                    'div[role="listbox"] > div, div[role="listbox"] > li',
+                    'li[role="option"], div[role="option"]',
+                    'ul[class*="autocomplete"] li, div[class*="autocomplete"] li'
+                ];
+                for (const sel of selectors) {
+                    const elements = document.querySelectorAll(sel);
+                    for (const el of elements) {
+                        if (el.textContent.trim().toLowerCase().includes(destination.toLowerCase())) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                }
+                const firstOpt = document.querySelector('li[role="option"], ul[data-selenium="autocomplete-result"] li');
+                if (firstOpt) {
+                    firstOpt.click();
                     return true;
                 }
+                return false;
             }
-        }
-        const containers = document.querySelectorAll('[role="listbox"], [data-selenium*="autocomplete"], [class*="autocomplete"]');
-        for (const container of containers) {
-            const firstChild = container.querySelector('li, div[role="option"]');
-            if (firstChild && firstChild.textContent.trim().toLowerCase().includes(destination.toLowerCase())) {
-                firstChild.click();
-                return true;
-            }
-        }
-        return false;
-    }
-""", destination)
+        """, destination)
 
         if not clicked:
             print("⚠️ Could not find autocomplete suggestion; pressing Enter as fallback.")
@@ -103,266 +78,207 @@ class AgodaSession(HotelSession):
         else:
             print("✅ Clicked autocomplete suggestion.")
         await self.page.wait_for_timeout(500)
-            
-      
-    
-        
 
-        # 4. Set dates – Agoda uses a different date picker
+        # 3. Set check-in and check-out dates
         checkin_date = datetime.strptime(checkin, "%Y-%m-%d")
         checkout_date = datetime.strptime(checkout, "%Y-%m-%d")
 
-      
         await self._select_date_agoda(checkin_date)
-
-        # Click the check-out field
-        
         await self._select_date_agoda(checkout_date)
 
-        # 5. Set guests (Agoda uses a dropdown)
-        guest_opened = await self.page.evaluate("""
-        () => {
-            // 1. Check if already open
-            const openPicker = document.querySelector('[role="dialog"][aria-label*="guests"], div[class*="guestPickerOpen"]');
-            if (openPicker) {
-                return "already_open";
-            }
-
-            // 2. Try standard CSS selectors (no :has-text)
-            const selectors = [
-                'button[data-selenium="guestPicker"]',
-                'button[aria-label*="guests"]',
-                'button[data-testid="guest-picker"]',
-                'div[data-selenium="guestPicker"] button'
-            ];
-            for (const sel of selectors) {
-                const btn = document.querySelector(sel);
-                if (btn && btn.offsetParent !== null) {
-                    btn.click();
-                    return "clicked";
-                }
-            }
-
-            // 3. Fallback: find any visible button that contains "Guests" in text
-            const allButtons = document.querySelectorAll('button');
-            for (const btn of allButtons) {
-                const text = btn.textContent.trim().toLowerCase();
-                if (text.includes('guests') && btn.offsetParent !== null) {
-                    btn.click();
-                    return "clicked_text";
-                }
-            }
-
-            // 4. Last resort: press Tab
-            const event = new KeyboardEvent('keydown', { key: 'Tab' });
-            document.dispatchEvent(event);
-            return "tab";
-        }
-    """)
-        # Function to safely click a plus button if visible
-        async def click_plus_button(selector, label, times=1):
-            button = self.page.locator(selector)
-            for _ in range(times):
-                if await button.count() > 0 and await button.is_visible():
-                    await button.click()
-                    print(f"clicked{label} button {times} times")
-                    await self.page.wait_for_timeout(200)
-                else:
-                    print(f"⚠️ {label} plus button not visible or not found.")
-                    break
-
-        print(f"DEBUG: adults={adults}, children={children}, rooms={rooms}")
-
-# Compute the number of clicks needed
-        adult_clicks_needed = max(0, adults - 1)   # default is 2
-        child_clicks_needed = children             # default is 0
-        room_clicks_needed = max(0, rooms - 1)     # default is 1
-
-        print(f"🔧 Clicks needed: Adult={adult_clicks_needed}, Child={child_clicks_needed}, Room={room_clicks_needed}")
-
-        # If no clicks needed, skip the whole JS call
-        if adult_clicks_needed == 0 and child_clicks_needed == 0 and room_clicks_needed == 0:
-            print("ℹ️ No guest adjustments needed.")
-        else:
-            # Run JavaScript to adjust guests and return detailed logs
-            result = await self.page.evaluate(
-                """
-                (config) => {
-                    const { adultClicks, childClicks, roomClicks } = config;
-                    const log = [];
-
-                    // Helper: find a button by text content within a container
-                    function findButtonByText(container, text) {
-                        const btns = container.querySelectorAll('button');
-                        for (const btn of btns) {
-                            if (btn.textContent.includes(text) && btn.offsetParent !== null && !btn.disabled) {
-                                return btn;
-                            }
-                        }
-                        return null;
-                    }
-
-                    // Helper: find plus button for a category
-                    function findPlusButton(category) {
-                        const categories = [category, category + 's'];
-                        // 1. Try aria-label with "Increase" or "Add"
-                        for (const name of categories) {
-                            const btn = document.querySelector(`button[aria-label*="Increase ${name}"]`);
-                            if (btn && btn.offsetParent !== null) return btn;
-                            const btnAdd = document.querySelector(`button[aria-label*="Add ${name}"]`);
-                            if (btnAdd && btnAdd.offsetParent !== null) return btnAdd;
-                        }
-                        // 2. Look for label text, then find '+' button nearby
-                        const labels = document.querySelectorAll('label, span, div');
-                        for (const label of labels) {
-                            const text = label.textContent.trim().toLowerCase();
-                            if (categories.some(c => text.includes(c))) {
-                                const container = label.closest('div, li, section') || label.parentElement;
-                                if (container) {
-                                    const plusBtn = findButtonByText(container, '+');
-                                    if (plusBtn) return plusBtn;
-                                    const ariaBtn = container.querySelector('button[aria-label*="increase"]');
-                                    if (ariaBtn && ariaBtn.offsetParent !== null) return ariaBtn;
-                                }
-                            }
-                        }
-                        // 3. Fallback: find any visible '+' button near category text
-                        const allButtons = document.querySelectorAll('button');
-                        for (const btn of allButtons) {
-                            if (btn.textContent.includes('+') && btn.offsetParent !== null) {
-                                const parent = btn.closest('div, li') || btn.parentElement;
-                                if (parent && parent.textContent.toLowerCase().includes(category.toLowerCase())) {
-                                    return btn;
-                                }
-                            }
-                        }
-                        return null;
-                    }
-
-                    // Click a plus button a number of times
-                    function clickPlusButton(category, times) {
-                        const startLog = log.length;
-                        if (times <= 0) {
-                            log.push(`ℹ️ No clicks needed for ${category}.`);
-                            return 0;
-                        }
-                        const btn = findPlusButton(category);
-                        if (!btn) {
-                            log.push(`❌ Could not find plus button for ${category}.`);
-                            return 0;
-                        }
-                        log.push(`✅ Found plus button for ${category}.`);
-                        let clicked = 0;
-                        for (let i = 0; i < times; i++) {
-                            if (btn.offsetParent === null || btn.disabled) {
-                                log.push(`⚠️ Button for ${category} became invisible/disabled after ${clicked} clicks.`);
-                                break;
-                            }
-                            btn.click();
-                            clicked++;
-                            log.push(`   Clicked ${category} plus (${clicked}/${times})`);
-                        }
-                        log.push(`📊 ${category} clicked ${clicked} times (expected ${times}).`);
-                        return clicked;
-                    }
-
-                    const result = {
-                        adultClicks: clickPlusButton('adult', adultClicks),
-                        childClicks: clickPlusButton('child', childClicks),
-                        roomClicks: clickPlusButton('room', roomClicks),
-                        log: log
-                    };
-                    return result;
-                }
-                """,
-                {
-                    "adultClicks": adult_clicks_needed,
-                    "childClicks": child_clicks_needed,
-                    "roomClicks": room_clicks_needed
-                }
-            )
-
-        # Print each log message from JavaScript
-        print("\n📋 Guest adjustment log:")
-        for msg in result['log']:
-            print(f"  {msg}")
-
-        # Print summary
-        print(f"\n✅ Summary:")
-        print(f"  Adult clicks: {result['adultClicks']} / {adult_clicks_needed}")
-        print(f"  Child clicks: {result['childClicks']} / {child_clicks_needed}")
-        print(f"  Room clicks:  {result['roomClicks']} / {room_clicks_needed}")
-
-        # Check if all expected clicks were performed
-        if (result['adultClicks'] != adult_clicks_needed or
-            result['childClicks'] != child_clicks_needed or
-            result['roomClicks'] != room_clicks_needed):
-            print("⚠️ Some guest adjustments may have failed.")
-        else:
-            print("✅ All guest adjustments completed successfully.")
-
-        await self.page.wait_for_timeout(500)
-        
-
-
-        # ... your existing code that fills destination, dates, guests ...
-        print("✅ All guest adjustments completed successfully.")
-        await self.page.screenshot(path="debug_after_hotels_click.png", full_page=True)
-        print("Screenshot saved to debug_after_hotels_click.png")
-
-        # --- NEW: verify we're actually on the Hotels-only form before searching ---
-        state = await self.page.evaluate("""
+        # 4. Open Guest Picker
+        await self.page.evaluate("""
             () => {
-                const tabs = [...document.querySelectorAll('button')].filter(b =>
-                    ['Hotels','Flights','Homes & Apts','Flight + Hotel','Activities','Airport transfer'].includes(b.textContent.trim())
+                const openPicker = document.querySelector('[role="dialog"][aria-label*="guests"], div[class*="guestPickerOpen"]');
+                if (openPicker) return;
+
+                const guestBtn = document.querySelector(
+                    'div[data-selenium="occupancyBox"], ' +
+                    'button[data-selenium="guestPicker"], ' +
+                    'button[data-testid="guest-picker"], ' +
+                    'div[data-element-name="occupancy-box"]'
                 );
-                const tabInfo = tabs.map(b => ({
-                    text: b.textContent.trim(),
-                    ariaSelected: b.getAttribute('aria-selected'),
-                    ariaCurrent: b.getAttribute('aria-current')
-                }));
-                const hasFlightFields = !!document.querySelector('[data-selenium="flight-option-button"], [data-selenium="flight-cabin-class-button"]');
-                return { tabInfo, hasFlightFields };
+                if (guestBtn) {
+                    guestBtn.click();
+                }
             }
         """)
-        print(state)
+        await self.page.wait_for_timeout(400)
 
-        if state['hasFlightFields']:
-            print("⚠️ Still on combo Flight+Hotel form — re-clicking Hotels tab")
-            await self.page.locator('button:has-text("Hotels")').click()
-            await self.page.wait_for_timeout(1000)  # or better: wait_for_selector to confirm flight fields are gone
-            
-        # Screenshot right after the click (catches the in-between/empty state)
-       
+        # 5. Adjust guests (Default on Agoda: 2 adults, 0 children, 1 room)
+        adult_clicks_needed = max(0, adults - 1)
+        adult_minus_needed = 1 if adults == 1 else 0
+        child_clicks_needed = children
+        room_clicks_needed = max(0, rooms - 1)
 
-        # --- then proceed to your existing search-click code ---
-        result = await self.page.evaluate("""
-        () => {
-            const log = [];
-            const buttons = [...document.querySelectorAll('button')];
-            log.push(`Found ${buttons.length} total buttons on page.`);
+        print(f"🔧 Guest adjustment: Adults (+{adult_clicks_needed} / -{adult_minus_needed}), Children (+{child_clicks_needed}), Rooms (+{room_clicks_needed})")
 
-            for (const btn of buttons) {
-                const text = btn.textContent.trim().toLowerCase();
-                if (text === 'search' && btn.offsetParent !== null && !btn.disabled) {
-                    btn.click();
-                    log.push('Clicked button with exact text "search".');
-                    return { success: true, log };
+        # Execute guest updates strictly scoped inside the guest dialog
+        adjust_result = await self.page.evaluate(
+            """
+            (config) => {
+                const { adultPlus, adultMinus, childPlus, roomPlus } = config;
+                const log = [];
+
+                // Scope to the occupancy / guest popup ONLY
+                const modal = document.querySelector(
+                    'div[data-selenium="occupancyBox"] [role="dialog"], ' +
+                    'div[data-selenium="occupancyBox"], ' +
+                    'div[class*="OccupancySelector"], ' +
+                    'div[class*="guestPicker"], ' +
+                    '[role="dialog"][aria-label*="guest" i]'
+                ) || document.body;
+
+                function getPlusButton(category) {
+                    // Try exact Agoda data-selenium attributes first
+                    const selectors = [
+                        `button[data-selenium="occupancy-${category}-plus"]`,
+                        `button[data-selenium="occupancy-${category}-increase"]`,
+                        `button[data-element-name="occupancy-${category}-increase"]`,
+                        `button[data-element-name="occupancy-${category}-plus"]`,
+                        `[data-element-name="occupancy-${category}"] button[data-selenium="plus"]`,
+                        `button[aria-label*="Increase ${category}" i]`,
+                        `button[aria-label*="Add ${category}" i]`
+                    ];
+                    for (const sel of selectors) {
+                        const btn = modal.querySelector(sel);
+                        if (btn && btn.offsetParent !== null && !btn.disabled) return btn;
+                    }
+
+                    // Fallback: look for category label, then find exact '+' button strictly inside that section
+                    const elements = modal.querySelectorAll('div, li, p, span');
+                    for (const el of elements) {
+                        if (el.textContent.trim().toLowerCase() === category || el.textContent.trim().toLowerCase() === category + 's') {
+                            const parent = el.closest('div[class*="item"], li, tr, div') || el.parentElement;
+                            if (parent) {
+                                const btns = parent.querySelectorAll('button');
+                                for (const btn of btns) {
+                                    // STRICT check: text must be exactly '+' or '＋', NEVER .includes('+')
+                                    const text = btn.textContent.trim();
+                                    if ((text === '+' || text === '＋') && btn.offsetParent !== null && !btn.disabled) {
+                                        return btn;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return null;
                 }
+
+                function getMinusButton(category) {
+                    const selectors = [
+                        `button[data-selenium="occupancy-${category}-minus"]`,
+                        `button[data-selenium="occupancy-${category}-decrease"]`,
+                        `button[data-element-name="occupancy-${category}-decrease"]`,
+                        `button[data-element-name="occupancy-${category}-minus"]`,
+                        `button[aria-label*="Decrease ${category}" i]`,
+                        `button[aria-label*="Remove ${category}" i]`
+                    ];
+                    for (const sel of selectors) {
+                        const btn = modal.querySelector(sel);
+                        if (btn && btn.offsetParent !== null && !btn.disabled) return btn;
+                    }
+                    return null;
+                }
+
+                function clickCount(btn, count, label) {
+                    if (!btn || count <= 0) return 0;
+                    let clicked = 0;
+                    for (let i = 0; i < count; i++) {
+                        if (btn.disabled || btn.offsetParent === null) break;
+                        btn.click();
+                        clicked++;
+                    }
+                    log.push(`Clicked ${label} ${clicked} times.`);
+                    return clicked;
+                }
+
+                if (adultMinus > 0) {
+                    const btn = getMinusButton('adult');
+                    clickCount(btn, adultMinus, 'adult minus');
+                }
+
+                clickCount(getPlusButton('adult'), adultPlus, 'adult plus');
+                clickCount(getPlusButton('child') || getPlusButton('children'), childPlus, 'child plus');
+                clickCount(getPlusButton('room'), roomPlus, 'room plus');
+
+                return { success: true, log };
             }
+            """,
+            {
+                "adultPlus": adult_clicks_needed,
+                "adultMinus": adult_minus_needed,
+                "childPlus": child_clicks_needed,
+                "roomPlus": room_clicks_needed
+            }
+        )
 
-            return { success: false, log };
-        }
-    """)
-
-        for msg in result['log']:
+        for msg in adjust_result.get('log', []):
             print(f"  {msg}")
 
-        if not result['success']:
-            raise Exception("Could not find Search button.")
+        await self.page.wait_for_timeout(300)
+
+        # 6. Click the Search button
+        print("🔍 Clicking Search button...")
+        search_clicked = await self.page.evaluate("""
+            () => {
+                // 1. Target Agoda's standard search button selectors
+                const searchSelectors = [
+                    'button[data-selenium="searchButton"]',
+                    'button[data-element-name="search-button"]',
+                    'button[data-cy="search-button"]',
+                    'button[data-testid="search-button"]',
+                    'button[data-testid="hotel-search-button"]',
+                    'button[data-selenium="search-box-search-button"]'
+                ];
+
+                for (const sel of searchSelectors) {
+                    const btn = document.querySelector(sel);
+                    if (btn && btn.offsetParent !== null && !btn.disabled) {
+                        btn.click();
+                        return { clicked: true, method: sel };
+                    }
+                }
+
+                // 2. Fallback: Find button with text containing "SEARCH"
+                const buttons = [...document.querySelectorAll('button')];
+                for (const btn of buttons) {
+                    const text = btn.textContent.trim().toUpperCase();
+                    if ((text.includes('SEARCH') || text.includes('SEARCH HOTELS')) && 
+                        !text.includes('FLIGHT') && 
+                        btn.offsetParent !== null && 
+                        !btn.disabled) {
+                        btn.click();
+                        return { clicked: true, method: 'text: ' + text };
+                    }
+                }
+                return { clicked: false };
+            }
+        """)
+
+        if not search_clicked.get("clicked"):
+            fallback_btn = self.page.locator(
+                'button[data-selenium="searchButton"], '
+                'button:has-text("SEARCH"), '
+                'button:has-text("Search")'
+            ).first
+            if await fallback_btn.count() > 0 and await fallback_btn.is_visible():
+                await fallback_btn.click()
+                print("✅ Clicked search button using Playwright locator.")
+            else:
+                raise Exception("Could not find or click the Agoda Search button.")
         else:
-            print("✅ Search initiated.")
-       
+            print(f"✅ Search button clicked via {search_clicked.get('method')}.")
+
+        # 7. Wait for results page to load
+        try:
+            await self.page.wait_for_selector(
+                "div[data-selenium='hotel-item'], div[data-testid='property-card'], ol.hotel-list-container li",
+                timeout=15000
+            )
+        except Exception:
+            print("⚠️ Timeout waiting for hotel cards; proceeding with current DOM.")
+
         # 8. Scrape hotel cards
         cards = self.page.locator("div[data-selenium='hotel-item'], div[data-testid='property-card']")
         count = min(await cards.count(), limit * 3)
@@ -405,32 +321,33 @@ class AgodaSession(HotelSession):
         day = date_obj.day
         date_str = date_obj.strftime("%Y-%m-%d")
 
-        # Wait for the date picker
         try:
-            await self.page.wait_for_selector('.DayPicker, .calendar, [role="grid"]', timeout=5000)
-        except:
+            await self.page.wait_for_selector('.DayPicker, .calendar, [role="grid"], div[data-selenium="calendar-wrapper"]', timeout=5000)
+        except Exception:
             raise Exception("Date picker did not appear on the page.")
 
-        # Pass a single object with both values
         result = await self.page.evaluate(
             """
             (args) => {
                 const dateStr = args.dateStr;
                 const day = args.day;
+
                 // 1. Try data-selenium or data-date
                 const byData = document.querySelector(
-                    `td[data-selenium="date-${dateStr}"] button, div[data-date="${dateStr}"]`
+                    `td[data-selenium="date-${dateStr}"] button, div[data-date="${dateStr}"], span[data-date="${dateStr}"]`
                 );
                 if (byData) {
                     byData.click();
                     return "data";
                 }
+
                 // 2. Try aria-label
                 const byAria = document.querySelector(`[aria-label*="${dateStr}"]`);
                 if (byAria) {
                     byAria.click();
                     return "aria";
                 }
+
                 // 3. Fallback: find visible enabled day number
                 const elements = document.querySelectorAll('button, td[role="gridcell"], div[role="gridcell"]');
                 for (const el of elements) {
@@ -444,34 +361,29 @@ class AgodaSession(HotelSession):
                 return false;
             }
             """,
-            {"dateStr": date_str, "day": day}   # one argument, a dict
+            {"dateStr": date_str, "day": day}
         )
 
-        if result == "data":
-            print(f"✅ Selected date {day:02d} using data-selenium.")
-        elif result == "aria":
-            print(f"✅ Selected date {day:02d} using aria-label.")
-        elif result == "fallback":
-            print(f"✅ Selected date {day:02d} using fallback (day number).")
-        else:
-            raise Exception(f"Could not select date {day:02d} on Agoda.")
-        await self.page.wait_for_timeout(500)
+        if not result:
+            raise Exception(f"Could not select date {date_str} on Agoda.")
+        await self.page.wait_for_timeout(400)
 
     async def _kill_popups(self):
-        print("✅ Using Agoda-specific popup killer")
-        """Override with Agoda-specific popup close selectors."""
+        """Close overlays, cookie banners, and discount popups."""
         popup_selectors = [
             "button[aria-label='Close']",
             "button[data-selenium='popup-close']",
             "div[class*='modal'] button.close",
-            "button:has-text('×')"
+            "button:has-text('×')",
+            "button:has-text('OK')",
+            "button:has-text('Accept')"
         ]
         for sel in popup_selectors:
             try:
-                if await self.page.locator(sel).count() > 0:
-                    await self.page.locator(sel).first.click()
-                    await self.page.wait_for_timeout(500)
-                    break
+                locator = self.page.locator(sel)
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    await locator.first.click()
+                    await self.page.wait_for_timeout(300)
             except Exception:
                 pass
 
@@ -479,13 +391,9 @@ class AgodaSession(HotelSession):
         if not hotel.detail_url:
             raise BookingError("No detail URL available for Agoda hotel. Please re-run the search.")
         await self.page.goto(hotel.detail_url, wait_until="domcontentloaded", timeout=30000)
-        # Agoda booking flow – you'll need to adapt selectors
-        # For now, a placeholder:
         return {
-            "cart_items": "Agoda booking flow not fully implemented yet.",
+            "cart_items": "Agoda booking flow placeholder.",
             "total_cost": 0,
             "packs_added": 0,
             "page_url": self.page.url,
         }
-
-# Exceptions are already defined in base class – no need to redefine
