@@ -1,3 +1,2 @@
-2026/08/15-10:54:14.073 9a8 Reusing MANIFEST C:\mycode\bangalore-travel-engine\agoda_profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/08/15-10:54:14.078 9a8 Recovering log #4
-2026/08/15-10:54:14.081 9a8 Reusing old log C:\mycode\bangalore-travel-engine\agoda_profile\Default\Local Storage\leveldb/000004.log 
+2026/08/15-12:31:34.992 5bc4 Creating DB C:\mycode\bangalore-travel-engine\agoda_profile\Default\Local Storage\leveldb since it was missing.
+2026/08/15-12:31:35.025 5bc4 Reusing MANIFEST C:\mycode\bangalore-travel-engine\agoda_profile\Default\Local Storage\leveldb/MANIFEST-000001

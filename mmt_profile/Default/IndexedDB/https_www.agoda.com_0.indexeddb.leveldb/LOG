@@ -1,0 +1,6 @@
+2026/08/15-13:08:43.687 923c Reusing MANIFEST C:\mycode\bangalore-travel-engine\mmt_profile\Default\IndexedDB\https_www.agoda.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/15-13:08:43.687 923c Recovering log #3
+2026/08/15-13:08:43.723 923c Reusing old log C:\mycode\bangalore-travel-engine\mmt_profile\Default\IndexedDB\https_www.agoda.com_0.indexeddb.leveldb/000003.log 
+2026/08/15-13:08:43.752 709c Level-0 table #5: started
+2026/08/15-13:08:43.768 709c Level-0 table #5: 1028907 bytes OK
+2026/08/15-13:08:43.770 709c Delete type=0 #3

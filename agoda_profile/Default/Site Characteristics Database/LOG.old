@@ -1,3 +1,5 @@
-2026/08/15-10:51:38.435 2b84 Reusing MANIFEST C:\mycode\bangalore-travel-engine\agoda_profile\Default\Site Characteristics Database/MANIFEST-000001
-2026/08/15-10:51:38.435 2b84 Recovering log #3
-2026/08/15-10:51:38.436 2b84 Reusing old log C:\mycode\bangalore-travel-engine\agoda_profile\Default\Site Characteristics Database/000003.log 
+2026/08/15-12:31:34.841 58f8 Log #3: 5 ops saved to Table #4 OK
+2026/08/15-12:31:34.843 58f8 Archiving C:\mycode\bangalore-travel-engine\agoda_profile\Default\Site Characteristics Database/000003.log: OK
+2026/08/15-12:31:34.843 58f8 Table #4: 5 entries OK
+2026/08/15-12:31:34.846 58f8 Archiving C:\mycode\bangalore-travel-engine\agoda_profile\Default\Site Characteristics Database/MANIFEST-000001: OK
+2026/08/15-12:31:34.853 58f8 **** Repaired leveldb C:\mycode\bangalore-travel-engine\agoda_profile\Default\Site Characteristics Database; recovered 1 files; 264 bytes. Some data may have been lost. ****

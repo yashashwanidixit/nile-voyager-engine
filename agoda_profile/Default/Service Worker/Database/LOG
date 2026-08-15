@@ -1,3 +1,2 @@
-2026/08/15-10:54:14.035 4ee0 Reusing MANIFEST C:\mycode\bangalore-travel-engine\agoda_profile\Default\Service Worker\Database/MANIFEST-000001
-2026/08/15-10:54:14.036 4ee0 Recovering log #3
-2026/08/15-10:54:14.036 4ee0 Reusing old log C:\mycode\bangalore-travel-engine\agoda_profile\Default\Service Worker\Database/000003.log 
+2026/08/15-12:31:36.873 8050 Creating DB C:\mycode\bangalore-travel-engine\agoda_profile\Default\Service Worker\Database since it was missing.
+2026/08/15-12:31:36.879 8050 Reusing MANIFEST C:\mycode\bangalore-travel-engine\agoda_profile\Default\Service Worker\Database/MANIFEST-000001

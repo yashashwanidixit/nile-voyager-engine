@@ -60,12 +60,10 @@ async def main():
     print("\n🔍 Searching all platforms (MakeMyTrip, Agoda, Booking.com)...")
     # 3. Scrape concurrently
     tasks = [
-        scrape_platform(MakeMyTripSession, "MakeMyTrip", destination, checkin, checkout,
-                        adults, children, rooms, limit=5),
+        
         scrape_platform(AgodaSession, "Agoda", destination, checkin, checkout,
                         adults, children, rooms, limit=5),
-        scrape_platform(BookingSession, "Booking.com", destination, checkin, checkout,
-                        adults, children, rooms, limit=5),
+       
     ]
     results = await asyncio.gather(*tasks)
     hotels_by_source = {name: hotels for name, hotels in results if hotels}
