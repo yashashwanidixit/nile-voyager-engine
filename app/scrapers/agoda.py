@@ -311,29 +311,38 @@ class AgodaSession(HotelSession):
         # --- After finding cards, scroll through the list first to force lazy content to mount ---
         for _ in range(8):
             await self.page.mouse.wheel(0, 1200)
-            await self.page.wait_for_timeout(350)
-        await self.page.wait_for_timeout(800)
+            await self.page.wait_for_timeout(1200)
+        await self.page.wait_for_timeout(1200)
         # Scroll back up so element positions are stable for the loop below
         await self.page.evaluate("window.scrollTo(0, 0)")
         await self.page.wait_for_timeout(300)
         
         
         
+        
+        
+
 
         hotels = []
         for i in range(min(card_count, limit * 3)):
             if len(hotels) >= limit:
+         
                 break
             card = cards.nth(i)
 
             # 1. Hotel name — target the title anchor directly, not the whole header
             name_el = card.locator('a[data-element-name="ssr-property-card-title"]')
+            
             name = ''
             if await name_el.count() > 0:
                 raw_name = await name_el.inner_text()
                 name = raw_name.strip()
             else:
-                print(f"⏭️ SKIP card {i}: no title element found.")
+                try:
+                    card_html = await card.inner_html()
+                    print(f"card {i} html:\n{card_html[:2000]}")
+                except Exception as e:
+                    print(f"⚠️ Could not fetch card {i} HTML either: {e}")
                 continue
 
             if not name or len(name) < 3:
@@ -351,14 +360,23 @@ class AgodaSession(HotelSession):
 
             price_el = card.locator('[data-selenium="display-price"]')
             price = None
+            is_sold_out = False
             try:
                 await price_el.first.wait_for(timeout=2500, state="attached")
                 price_raw = await price_el.first.inner_text()
-                print(f"✅ DEBUG: Price found for '{name}': raw = '{price_raw}'")
                 match = re.search(r'\d[\d,]*', price_raw)
                 price = float(match.group().replace(',', '')) if match else None
             except Exception:
-                print(f"❌ DEBUG: Price not found for '{name}' after wait.")
+                # Check if this is a genuine "sold out" case rather than a scraping failure
+                sold_out_text = card.locator('text=/Sold out/i')
+                if await sold_out_text.count() > 0:
+                    is_sold_out = True
+                    print(f"🚫 '{name}' is sold out for these dates — skipping.")
+                else:
+                    print(f"❌ DEBUG: Price not found for '{name}' — unknown reason, not sold-out.")
+
+            if is_sold_out:
+                continue  # don't add sold-out hotels to results
                 
 
             # 3. Rating – use the review container (no strict mode)

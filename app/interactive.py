@@ -62,7 +62,7 @@ async def main():
     tasks = [
         
         scrape_platform(AgodaSession, "Agoda", destination, checkin, checkout,
-                        adults, children, rooms, limit=5),
+                        adults, children, rooms, limit=10),
        
     ]
     results = await asyncio.gather(*tasks)
@@ -73,7 +73,7 @@ async def main():
         return
 
     # 4. Rank and display
-    ranked = select_top_hotels(hotels_by_source, profile, per_source=5)
+    ranked = select_top_hotels(hotels_by_source, profile, per_source=10)
     print(f"\n🏨 Found {len(ranked)} top recommendations (ranked for your profile):\n")
     for i, hotel in enumerate(ranked, 1):
         print(f"  [{i}] {hotel.name} — ₹{hotel.price_per_night}/night — {hotel.rating or 'N/A'}⭐")
