@@ -27,6 +27,7 @@ class Hotel:
     distance_km_from_target: Optional[float] = None
     reason: Optional[str] = None
     detail_url: Optional[str] = None 
+    description:Optional[str] = None
 
 
 @dataclass

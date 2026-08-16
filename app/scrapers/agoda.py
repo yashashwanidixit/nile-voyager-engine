@@ -73,10 +73,10 @@ class AgodaSession(HotelSession):
         """, destination)
 
         if not clicked:
-            print("⚠️ Could not find autocomplete suggestion; pressing Enter as fallback.")
+            print(" Could not find autocomplete suggestion; pressing Enter as fallback.")
             await dest_input.press("Enter")
         else:
-            print("✅ Clicked autocomplete suggestion.")
+            print(" Clicked autocomplete suggestion.")
         await self.page.wait_for_timeout(500)
 
         # 3. Set check-in and check-out dates
@@ -219,7 +219,7 @@ class AgodaSession(HotelSession):
         await self.page.wait_for_timeout(300)
 
         # 6. Click the Search button
-        print("🔍 Clicking Search button...")
+        print(" Clicking Search button...")
         search_clicked = await self.page.evaluate("""
             () => {
                 // 1. Target Agoda's standard search button selectors
@@ -264,11 +264,11 @@ class AgodaSession(HotelSession):
             ).first
             if await fallback_btn.count() > 0 and await fallback_btn.is_visible():
                 await fallback_btn.click()
-                print("✅ Clicked search button using Playwright locator.")
+                print(" Clicked search button using Playwright locator.")
             else:
                 raise Exception("Could not find or click the Agoda Search button.")
         else:
-            print(f"✅ Search button clicked via {search_clicked.get('method')}.")
+            print(f" Search button clicked via {search_clicked.get('method')}.")
 
         # 7. Wait for results page to load
         try:
@@ -277,15 +277,15 @@ class AgodaSession(HotelSession):
                 timeout=15000
             )
         except Exception:
-            print("⚠️ Timeout waiting for hotel cards; proceeding with current DOM.")
+            print(" Timeout waiting for hotel cards; proceeding with current DOM.")
 
                 # 7. Wait for results page to load
         await self.page.wait_for_load_state("networkidle", timeout=35000)
         await self.page.screenshot(path="agoda_search_results.png", full_page=True)
-        print("📸 Screenshot saved as agoda_search_results.png")
+        print(" Screenshot saved as agoda_search_results.png")
 
         # 8. Scrape hotel cards using stable selectors
-        print("🔍 Scraping hotel cards with stable selectors...")
+        print(" Scraping hotel cards with stable selectors...")
 
         # Primary card selector (from your inspection)
         card_selector = 'li[data-selenium="hotel-item"]'
@@ -294,20 +294,20 @@ class AgodaSession(HotelSession):
 
         if card_count == 0:
             # Fallback: try alternative selectors
-            print("⚠️ No cards with 'li[data-selenium=\"hotel-item\"]'. Trying alternatives...")
+            print(" No cards with 'li[data-selenium=\"hotel-item\"]'. Trying alternatives...")
             alt_selectors = ['div[data-testid="property-card"]', 'div[data-selenium="hotel-item"]']
             for sel in alt_selectors:
                 cards = self.page.locator(sel)
                 card_count = await cards.count()
                 if card_count > 0:
-                    print(f"✅ Found {card_count} cards using '{sel}'.")
+                    print(f" Found {card_count} cards using '{sel}'.")
                     break
             if card_count == 0:
                 await self.page.screenshot(path="agoda_no_cards.png")
-                print("📸 No cards found. Saved agoda_no_cards.png")
+                print(" No cards found. Saved agoda_no_cards.png")
                 return []
 
-        print(f"🔍 Found {card_count} card elements.")
+        print(f" Found {card_count} card elements.")
         # --- After finding cards, scroll through the list first to force lazy content to mount ---
         for _ in range(8):
             await self.page.mouse.wheel(0, 1200)
@@ -342,7 +342,7 @@ class AgodaSession(HotelSession):
                     card_html = await card.inner_html()
                     print(f"card {i} html:\n{card_html[:2000]}")
                 except Exception as e:
-                    print(f"⚠️ Could not fetch card {i} HTML either: {e}")
+                    print(f" Could not fetch card {i} HTML either: {e}")
                 continue
 
             if not name or len(name) < 3:
@@ -350,13 +350,28 @@ class AgodaSession(HotelSession):
                 continue
 
             # 2. Distance — separate, targeted element instead of parsing header blob
-            distance = ''
-            dist_el = card.locator('[data-selenium="distance"], span:has-text("km from"), span:has-text("to center")').first
-            if await dist_el.count() > 0:
-                dist_text = await dist_el.inner_text()
-                dist_match = re.search(r'(\d+\.?\d*)\s*km', dist_text, re.I)
+            # Area/city text + distance to center
+            area_el = card.locator('[data-selenium="area-city-text"]')
+            area_name = ''
+            distance_to_center = ''
+            if await area_el.count() > 0:
+                area_text = await area_el.first.inner_text()
+                # e.g. "Whitefield, Bangalore - 10.9 km to center"
+                dist_match = re.search(r'(\d+\.?\d*)\s*km\s*to\s*center', area_text, re.I)
                 if dist_match:
-                    distance = dist_match.group(0)
+                    distance_to_center = dist_match.group(0)  # "10.9 km to center"
+                    area_name = area_text[:dist_match.start()].rstrip(' -').strip()  # "Whitefield, Bangalore"
+                else:
+                    area_name = area_text.strip()
+
+            # Nearest landmark — separate element entirely, no splitting needed
+            landmark_el = card.locator('[data-selenium="popular-landmarks-text"]')
+            landmark = ''
+            if await landmark_el.count() > 0:
+                landmark = (await landmark_el.first.inner_text()).strip()  # "2.1 km from Hoodi Station"
+
+            extra_description = ", ".join(filter(None, [distance_to_center, landmark]))
+# → "10.9 km to center, 2.1 km from Hoodi Station"
 
             price_el = card.locator('[data-selenium="display-price"]')
             price = None
@@ -371,9 +386,9 @@ class AgodaSession(HotelSession):
                 sold_out_text = card.locator('text=/Sold out/i')
                 if await sold_out_text.count() > 0:
                     is_sold_out = True
-                    print(f"🚫 '{name}' is sold out for these dates — skipping.")
+                    print(f" '{name}' is sold out for these dates — skipping.")
                 else:
-                    print(f"❌ DEBUG: Price not found for '{name}' — unknown reason, not sold-out.")
+                    print(f" DEBUG: Price not found for '{name}' — unknown reason, not sold-out.")
 
             if is_sold_out:
                 continue  # don't add sold-out hotels to results
@@ -401,7 +416,7 @@ class AgodaSession(HotelSession):
             # 5. Filter out non-hotel properties
             full_text = await card.inner_text()
             if re.search(r'(Entire home|Private room|Homes & Apts)', full_text, re.I):
-                print(f"⏭️ Skipping non-hotel: {name}")
+                print(f"⏭ Skipping non-hotel: {name}")
                 continue
 
             hotels.append(
@@ -413,11 +428,12 @@ class AgodaSession(HotelSession):
                     price_per_night=price,
                     address=destination,
                     detail_url=detail_url,
+                    description =extra_description,
                 )
             )
-            print(f"🏨 Found: {name} — ₹{price} — rating {rating} (distance: {distance})")
+            print(f" Found: {name} — ₹{price} — rating {rating} — {extra_description}")
 
-        print(f"🏨 Scraped {len(hotels)} hotels from Agoda.")
+        print(f" Scraped {len(hotels)} hotels from Agoda.")
         return hotels
     
     # ------------------- Helper methods -------------------

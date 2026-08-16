@@ -78,6 +78,7 @@ async def main():
     for i, hotel in enumerate(ranked, 1):
         print(f"  [{i}] {hotel.name} — ₹{hotel.price_per_night}/night — {hotel.rating or 'N/A'}⭐")
         print(f"      Source: {hotel.source}, Address: {hotel.address}\n")
+        print(f"Description: {hotel.description}")
 
     print("Type a number to select, or 0 to cancel.")
     try:
