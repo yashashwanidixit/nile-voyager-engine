@@ -14,7 +14,7 @@ class AgodaSession(HotelSession):
 
     async def search_hotels(self, destination: str, checkin: str, checkout: str,
                             adults: int = 2, children: int = 0, rooms: int = 1,
-                            limit: int = 5) -> List[Hotel]:
+                            limit: int = 10) -> List[Hotel]:
         # 1. Go to Agoda homepage
         await self.page.goto("https://www.agoda.com/", wait_until="domcontentloaded")
         await self._kill_popups()
@@ -279,35 +279,35 @@ class AgodaSession(HotelSession):
         except Exception:
             print("⚠️ Timeout waiting for hotel cards; proceeding with current DOM.")
 
-        # 8. Scrape hotel cards using content-based extraction (Zepto-style)
-        await self.page.wait_for_load_state("networkidle", timeout=15000)
-        
-        # Take a screenshot for debugging
+                # 7. Wait for results page to load
+        await self.page.wait_for_load_state("networkidle", timeout=35000)
         await self.page.screenshot(path="agoda_search_results.png", full_page=True)
         print("📸 Screenshot saved as agoda_search_results.png")
-        
-        print("🔍 Scraping hotel cards...")
 
-        # Locator for card containers (stable selectors)
-        card_selector = 'div[data-selenium="hotel-item"], div[data-testid="property-card"], li[data-selenium="hotel-item"]'
+        # 8. Scrape hotel cards using stable selectors
+        print("🔍 Scraping hotel cards with stable selectors...")
+
+        # Primary card selector (from your inspection)
+        card_selector = 'li[data-selenium="hotel-item"]'
         cards = self.page.locator(card_selector)
         card_count = await cards.count()
 
-        # Fallback: if no cards with standard selector, find by URL pattern
         if card_count == 0:
-            print("⚠️ No cards with standard selector; falling back to URL pattern.")
-            links = self.page.locator('a[href*="/hotel/"], a[href*="/en-in/hotel/"]')
-            link_count = await links.count()
-            if link_count == 0:
+            # Fallback: try alternative selectors
+            print("⚠️ No cards with 'li[data-selenium=\"hotel-item\"]'. Trying alternatives...")
+            alt_selectors = ['div[data-testid="property-card"]', 'div[data-selenium="hotel-item"]']
+            for sel in alt_selectors:
+                cards = self.page.locator(sel)
+                card_count = await cards.count()
+                if card_count > 0:
+                    print(f"✅ Found {card_count} cards using '{sel}'.")
+                    break
+            if card_count == 0:
                 await self.page.screenshot(path="agoda_no_cards.png")
-                print("📸 No card links found. Saved agoda_no_cards.png")
+                print("📸 No cards found. Saved agoda_no_cards.png")
                 return []
-            # Use the parent containers of the links
-            cards = links.locator('xpath=ancestor::div[1]')
-            card_count = await cards.count()
-            print(f"🔍 Found {card_count} cards via URL pattern.")
-        else:
-            print(f"🔍 Found {card_count} card elements.")
+
+        print(f"🔍 Found {card_count} card elements.")
 
         hotels = []
         for i in range(min(card_count, limit * 3)):
@@ -315,60 +315,73 @@ class AgodaSession(HotelSession):
                 break
             card = cards.nth(i)
 
-            # 1. Get all visible text lines
-            full_text = await card.inner_text()
-            lines = [line.strip() for line in full_text.splitlines() if line.strip()]
-
-            # Helper: find a line matching a pattern
-            def find_line(patterns):
-                for line in lines:
-                    for pat in patterns:
-                        if pat.search(line):
-                            return line
-                return None
-
-            # 2. Extract Name: first line that is not a rating/price and length > 3
-            name = None
-            for line in lines:
-                if (not line.startswith(('₹', 'Rs.')) and
-                    not re.search(r'^\d+\.?\d*\s*(Excellent|Very Good|Good|Okay|Poor)', line) and
-                    not re.search(r'^\d+\.?\d*\s*/\s*\d+', line) and
-                    len(line) > 3):
-                    name = line
-                    break
-            if not name:
-                # Fallback: first line
-                name = lines[0] if lines else None
+            # 1. Hotel name & distance from header
+            header = card.locator('header[data-element-name="property-info-header"]')
+            header_html = await card.locator('header[data-element-name="property-info-header"]').inner_html()
+            print(header_html[:800])
+            header_text = await header.inner_text() if await header.count() > 0 else ''
+            name = ''
+            distance = ''
+            if header_text:
+                import re
+                # Remove star symbols
+                clean_header = re.sub(r'[★☆✩✪✫✬✭✮✯✰✱✲✳✴✵✶✷✸✹✺✻✼✽✾✿❀❁❂❃❄❅❆❇❈❉❊❋]', '', header_text).strip()
+                dist_match = re.search(r'(\d+\.?\d*)\s*km', clean_header, re.I)
+                if dist_match:
+                    distance = dist_match.group(0)
+                    name = clean_header.replace(distance, '').strip()
+                else:
+                    name = clean_header.strip()
             if not name or len(name) < 3:
+                raw_html = await card.inner_html()
+                print(f"⏭️ SKIP card {i}: no header match. First 300 chars:\n{raw_html[:300]}")
                 continue
 
-            # 3. Extract Price: line containing ₹ or Rs.
-            price_line = find_line([re.compile(r'₹\s*[\d,]+(\.\d+)?'), re.compile(r'Rs\.\s*[\d,]+(\.\d+)?')])
-            price = None
-            if price_line:
-                # Extract digits and dot
-                digits = ''.join(ch for ch in price_line if ch.isdigit() or ch == '.')
+            # 2. Price
+            # 2. Price – with debug
+            for _ in range(6):
+                await self.page.mouse.wheel(0, 1500)
+                await self.page.wait_for_timeout(400)
+            await self.page.wait_for_timeout(1000)
+            try:
+                await card.locator('span[data-selenium="display-price"]').wait_for(timeout=2000)
+            except Exception:
+                pass
+            price_el = card.locator('span[data-selenium="display-price"]')
+            price_raw = None
+            if await price_el.count() > 0:
+                price_raw = await price_el.text_content()
+                print(f"✅ DEBUG: Price locator found for '{name}': raw text = '{price_raw}'")
+                digits = ''.join(ch for ch in price_raw if ch.isdigit() or ch == '.')
                 price = float(digits) if digits else None
+            else:
+                print(f"❌ DEBUG: Price locator NOT found for '{name}'")
+                price = None
 
-            # 4. Extract Rating: line with number and "Excellent", "Very Good", or "X/10"
-            rating_line = find_line([re.compile(r'\d+\.?\d*\s*(Excellent|Very Good|Good|Okay|Poor)'),
-                                    re.compile(r'\d+\.?\d*\s*/\s*\d+')])
+            # 3. Rating – use the review container (no strict mode)
+            review_container = card.locator('[data-element-name="property-card-review"]')
             rating = None
-            if rating_line:
-                match = re.search(r'(\d+\.?\d*)', rating_line)
-                if match:
-                    rating = float(match.group(1))
+            if await review_container.count() > 0:
+                review_text = await review_container.text_content()
+                if review_text:
+                    # Extract rating from text like "Average rating Excellent 8.0 out of 10 with 1,009 reviews"
+                    match = re.search(r'(\d+\.?\d*)\s*(?:out of|Excellent|Very Good|Good)', review_text, re.I)
+                    if match:
+                        rating = float(match.group(1))
 
-            # 5. Extract Address (optional): look for a line containing a city name or "km"
-            # We'll skip this for now; we can use destination as fallback.
-
-            # 6. Detail URL
+            # 4. Detail URL
             link_el = card.locator('a').first
             detail_url = await link_el.get_attribute('href') if await link_el.count() > 0 else None
             if detail_url and not detail_url.startswith('http'):
                 detail_url = 'https://www.agoda.com' + detail_url
 
             hotel_id = detail_url.split('/')[-2] if detail_url else f'agoda-{i}'
+
+            # 5. Filter out non-hotel properties
+            full_text = await card.inner_text()
+            if re.search(r'(Entire home|Private room|Homes & Apts)', full_text, re.I):
+                print(f"⏭️ Skipping non-hotel: {name}")
+                continue
 
             hotels.append(
                 Hotel(
@@ -377,11 +390,11 @@ class AgodaSession(HotelSession):
                     source="Agoda",
                     rating=rating,
                     price_per_night=price,
-                    address=destination,  # we can use destination as address
-                    detail_url=detail_url
+                    address=destination,
+                    detail_url=detail_url,
                 )
             )
-            print(f"🏨 Found: {name} — ₹{price} — rating {rating}")
+            print(f"🏨 Found: {name} — ₹{price} — rating {rating} (distance: {distance})")
 
         print(f"🏨 Scraped {len(hotels)} hotels from Agoda.")
         return hotels
