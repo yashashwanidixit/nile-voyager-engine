@@ -308,6 +308,17 @@ class AgodaSession(HotelSession):
                 return []
 
         print(f"🔍 Found {card_count} card elements.")
+        # --- After finding cards, scroll through the list first to force lazy content to mount ---
+        for _ in range(8):
+            await self.page.mouse.wheel(0, 1200)
+            await self.page.wait_for_timeout(350)
+        await self.page.wait_for_timeout(800)
+        # Scroll back up so element positions are stable for the loop below
+        await self.page.evaluate("window.scrollTo(0, 0)")
+        await self.page.wait_for_timeout(300)
+        
+        
+        
 
         hotels = []
         for i in range(min(card_count, limit * 3)):
@@ -315,48 +326,40 @@ class AgodaSession(HotelSession):
                 break
             card = cards.nth(i)
 
-            # 1. Hotel name & distance from header
-            header = card.locator('header[data-element-name="property-info-header"]')
-            header_html = await card.locator('header[data-element-name="property-info-header"]').inner_html()
-            print(header_html[:800])
-            header_text = await header.inner_text() if await header.count() > 0 else ''
+            # 1. Hotel name — target the title anchor directly, not the whole header
+            name_el = card.locator('a[data-element-name="ssr-property-card-title"]')
             name = ''
-            distance = ''
-            if header_text:
-                import re
-                # Remove star symbols
-                clean_header = re.sub(r'[★☆✩✪✫✬✭✮✯✰✱✲✳✴✵✶✷✸✹✺✻✼✽✾✿❀❁❂❃❄❅❆❇❈❉❊❋]', '', header_text).strip()
-                dist_match = re.search(r'(\d+\.?\d*)\s*km', clean_header, re.I)
-                if dist_match:
-                    distance = dist_match.group(0)
-                    name = clean_header.replace(distance, '').strip()
-                else:
-                    name = clean_header.strip()
-            if not name or len(name) < 3:
-                raw_html = await card.inner_html()
-                print(f"⏭️ SKIP card {i}: no header match. First 300 chars:\n{raw_html[:300]}")
+            if await name_el.count() > 0:
+                raw_name = await name_el.inner_text()
+                name = raw_name.strip()
+            else:
+                print(f"⏭️ SKIP card {i}: no title element found.")
                 continue
 
-            # 2. Price
-            # 2. Price – with debug
-            for _ in range(6):
-                await self.page.mouse.wheel(0, 1500)
-                await self.page.wait_for_timeout(400)
-            await self.page.wait_for_timeout(1000)
+            if not name or len(name) < 3:
+                print(f"no name found")
+                continue
+
+            # 2. Distance — separate, targeted element instead of parsing header blob
+            distance = ''
+            dist_el = card.locator('[data-selenium="distance"], span:has-text("km from"), span:has-text("to center")').first
+            if await dist_el.count() > 0:
+                dist_text = await dist_el.inner_text()
+                dist_match = re.search(r'(\d+\.?\d*)\s*km', dist_text, re.I)
+                if dist_match:
+                    distance = dist_match.group(0)
+
+            price_el = card.locator('[data-selenium="display-price"]')
+            price = None
             try:
-                await card.locator('span[data-selenium="display-price"]').wait_for(timeout=2000)
+                await price_el.first.wait_for(timeout=2500, state="attached")
+                price_raw = await price_el.first.inner_text()
+                print(f"✅ DEBUG: Price found for '{name}': raw = '{price_raw}'")
+                match = re.search(r'\d[\d,]*', price_raw)
+                price = float(match.group().replace(',', '')) if match else None
             except Exception:
-                pass
-            price_el = card.locator('span[data-selenium="display-price"]')
-            price_raw = None
-            if await price_el.count() > 0:
-                price_raw = await price_el.text_content()
-                print(f"✅ DEBUG: Price locator found for '{name}': raw text = '{price_raw}'")
-                digits = ''.join(ch for ch in price_raw if ch.isdigit() or ch == '.')
-                price = float(digits) if digits else None
-            else:
-                print(f"❌ DEBUG: Price locator NOT found for '{name}'")
-                price = None
+                print(f"❌ DEBUG: Price not found for '{name}' after wait.")
+                
 
             # 3. Rating – use the review container (no strict mode)
             review_container = card.locator('[data-element-name="property-card-review"]')
