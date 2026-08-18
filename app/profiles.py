@@ -8,6 +8,7 @@ PROFILES = {
         rating_max=5.0,
         rating_label="5-star / luxury",
         preferred_vehicle_type="Cab",
+    
     ),
     "user_4star": UserProfile(
         id="user_4star",

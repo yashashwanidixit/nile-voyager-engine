@@ -12,6 +12,30 @@ from app.scrapers.makemytrip import MakeMyTripSession, SessionExpiredError
 from app.scrapers.agoda import AgodaSession
 from app.scrapers.booking import BookingSession
 
+CITY_CODES = {
+    "dubai": "CTDUB",
+    "manali": "CTKUU",
+    "mumbai": "CTBOM",
+    "goa": "CTGOI",
+    "bangalore" :"CTBLR",
+    # add as needed
+}
+AREA_CODES = {
+    ("bangalore", "whitefield"): "ARWHI",
+    # ("bangalore", "indiranagar"): "ARxxx",  # capture as needed
+}
+
+def resolve_city_code(user_input: str) -> str | None:
+        return CITY_CODES.get(user_input.strip().lower())
+
+
+def resolve_area_code(city_input: str, area_input: str) -> str | None:
+    """
+    Returns the area code (e.g. 'ARWHI') for a given city+area pair,
+    or None if the area isn't in AREA_CODES (i.e. do a whole-city search instead).
+    """
+    key = (city_input.strip().lower(), area_input.strip().lower())
+    return AREA_CODES.get(key)    
 
 
 async def scrape_platform(platform_class, platform_name, destination, checkin, checkout,
@@ -19,9 +43,10 @@ async def scrape_platform(platform_class, platform_name, destination, checkin, c
     """Helper to scrape a single platform and handle errors."""
     try:
         async with platform_class() as session:
+            
             hotels = await session.search_hotels(
                 destination, checkin, checkout,
-                adults=adults, children=children, rooms=rooms, limit=limit
+                adults=adults, children=children, rooms=rooms, limit=limit,
             )
             return platform_name, hotels
     except FileNotFoundError as e:
@@ -31,7 +56,7 @@ async def scrape_platform(platform_class, platform_name, destination, checkin, c
         print(f"⚠️  {platform_name} session expired: {e}")
         return platform_name, []
     except Exception as e:
-        print(f"⚠️  {platform_name} error: {e}")
+        print(f"⚠️  {platform_name} ndi error: {e}")
         return platform_name, []
 
 async def main():
@@ -48,6 +73,7 @@ async def main():
     adults = int(input("Adults → ") or "2")
     children = int(input("Children → ") or "0")
     rooms = int(input("Rooms → ") or "1")
+    
 
     # 2. Load profile
     profile_id = input("Profile ID (default) → ") or "default"
@@ -61,7 +87,7 @@ async def main():
     # 3. Scrape concurrently
     tasks = [
         
-        scrape_platform(AgodaSession, "Agoda", destination, checkin, checkout,
+        scrape_platform(MakeMyTripSession, "MakeMyTrip", destination, checkin, checkout,
                         adults, children, rooms, limit=10),
        
     ]
@@ -74,7 +100,7 @@ async def main():
 
     # 4. Rank and display
     ranked = select_top_hotels(hotels_by_source, profile, per_source=10)
-    print(f"\n🏨 Found {len(ranked)} top recommendations (ranked for your profile):\n")
+    print(f"\n Found {len(ranked)} top recommendations (ranked for your profile):\n")
     for i, hotel in enumerate(ranked, 1):
         print(f"  [{i}] {hotel.name} — ₹{hotel.price_per_night}/night — {hotel.rating or 'N/A'}⭐")
         print(f"      Source: {hotel.source}, Address: {hotel.address}\n")
@@ -117,18 +143,18 @@ async def main():
         print(f"Unknown source {selected.source}. Cannot book.")
         return
 
-    print("\n🌐 Opening browser to book...")
+    print("\n Opening browser to book...")
     try:
         async with session_cls() as session:
             booking_info = await session.book_hotel(selected)   # pass the Hotel object
-            print(f"\n✅ Added to cart. Total: ₹{booking_info['total_cost']}")
-            print(f"📄 Checkout page: {booking_info['page_url']}")
-            print("\n⏳ Please fill in guest details manually in the browser.")
+            print(f"\n Added to cart. Total: ₹{booking_info['total_cost']}")
+            print(f" Checkout page: {booking_info['page_url']}")
+            print("\n Please fill in guest details manually in the browser.")
             input("Press ENTER when done (or to cancel) → ")
     except Exception as e:
-        print(f"\n❌ Booking error: {e}")
+        print(f"\n Booking error: {e}")
 
-    print("\n👋 Thanks for using Travel Assistant!")
+    print("\n Thanks for using Travel Assistant!")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -11,6 +11,7 @@ class UserProfile:
     rating_max: float           # inclusive upper bound (hotels)
     rating_label: str           # human readable, used in the hotel "reason" text
     preferred_vehicle_type: str  # "Bike" | "Auto" | "Cab" -> highlighted in every platform's results
+   
 
 
 @dataclass
